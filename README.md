@@ -1,5 +1,55 @@
 # MiniImageLoader
 
+## 4 ý chính
+
+Gói gọn: **đúng ô (1), không làm việc thừa (2, 3), không tốn bộ nhớ (4).**
+
+### 1. Check request của từng ImageView — chống load nhầm ô
+
+Mỗi lần load tạo **một object `ImageRequest` mới** và cất vào tag của ImageView (`R.id.mini_image_request`). Tải xong chỉ gán ảnh nếu tag **vẫn `===` đúng object đó** — kiểm tra trên main thread. Kèm theo: gán placeholder ngay khi load để ô tái dùng không hiện ảnh cũ.
+
+```kotlin
+val request = ImageRequest(url, target, ...)          // object mới mỗi lần
+target.setTag(R.id.mini_image_request, request)
+// ...tải xong:
+target.post {
+    if (target.getTag(R.id.mini_image_request) !== request) return@post   // ô đã đổi item → bỏ
+    target.setImageBitmap(bitmap)
+}
+```
+
+So object chứ không so URL: một ô có thể `#20 → #45 → #20`, hai lần `#20` là hai request khác nhau.
+
+### 2. Cancel request khi ô bị tái dùng
+
+`MiniImageLoader.cancel(imageView)` được gọi trong `onViewRecycled`, và tự gọi khi ô bind sang URL khác. Request mạng chỉ thật sự bị huỷ khi **không còn ô nào chờ URL đó** — ô trái cuộn đi không làm hỏng ô phải cùng ảnh.
+
+### 3. Dùng lại nếu cùng resource
+
+Ba mức, từ nhanh đến chậm:
+
+| Ảnh đang ở đâu | Làm gì |
+|---|---|
+| **Đang được tải** | Ô sau chỉ đăng ký chờ chung lượt tải (map `inFlight: URL → DownloadJob`) → nhiều ô cùng URL = 1 request mạng |
+| **Có trong RAM** | Gán ngay (≈ 0 ms) |
+| **Có trên đĩa** | Đọc file + decode, không gọi mạng |
+
+Ô cùng cỡ chỉ decode 1 lần. `inFlight` không phải một tầng cache — nó không lưu ảnh, chỉ ghi "URL này đang được tải".
+
+### 4. Quản lý bộ nhớ — cache 2 tầng
+
+| | Tầng 1: RAM | Tầng 2: Đĩa |
+|---|---|---|
+| Lưu dạng | Bitmap đã decode, đúng cỡ ô (~2 MB / ảnh 720 px) | File JPEG nén từ server (~130 KB / ảnh) |
+| Giới hạn | `LruCache` tính theo **byte**, ≤ 1/8 heap | **50 MB** |
+| Dọn khi đầy | LruCache đẩy ảnh lâu không dùng; `onTrimMemory` → xoá hết | Xoá file có **`lastModified` cũ nhất** (mỗi lần đọc trúng cache đều cập nhật mốc này → "lâu không dùng nhất") |
+| Tránh được | decode lại | tải lại qua mạng |
+| Tắt app | mất | còn |
+
+Thêm vào đó: **decode đúng cỡ ô** bằng `inSampleSize` — ảnh 4000 px cho ô 500 px từ ~48 MB còn ~0,75 MB.
+
+---
+
 ## Có gì mới so với bản đầu tiên
 
 Bản đầu tiên tải và hiển thị được ảnh, nhưng khi cuộn nhanh thì lộ nhiều lỗi. Bản này sửa toàn bộ, đã kiểm lại trên emulator với cùng kịch bản:
