@@ -5,7 +5,6 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
-import com.bumptech.glide.Glide
 import com.example.zzzzz.MiniImageLoader
 import com.example.zzzzz.R
 import com.example.zzzzz.databinding.ItemFeedBinding
@@ -27,20 +26,21 @@ class FeedAdapter(
     }
 
     override fun onViewRecycled(holder: ViewHolder) {
-        // Huỷ request đang chạy + trả bitmap về pool khi ô bị tái dùng
-        Glide.with(holder.binding.image).clear(holder.binding.image)
+        // Ô bị tái dùng → huỷ request đang chạy của nó
+        MiniImageLoader.cancel(holder.binding.image)
     }
 
     inner class ViewHolder(val binding: ItemFeedBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(item: FeedItem) {
             binding.title.text = item.title
-            // into(view) tự huỷ request cũ của ImageView này → không bị nhầm ô khi cuộn nhanh
+            // Tự huỷ request cũ của ImageView này → không bị nhầm ô khi cuộn nhanh
 
             MiniImageLoader.loadAndShowImage(
                 context = binding.root.context,
                 url = sizedUrl(item.imageUrl, cellWidthPx),
                 target = binding.image,
-                placeHolder = R.color.feed_placeholder
+                placeHolder = R.color.feed_placeholder,
+                errorPlaceHolder = R.color.feed_error,
             )
 //            Glide.with(binding.image)
 //                .load(sizedUrl(item.imageUrl, cellWidthPx))

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tag trên ImageView: request MiniImageLoader hiện tại của ô (chống nhầm ô, để huỷ) -->
+    <item name="mini_image_request" type="id" />
+</resources>

@@ -176,6 +176,39 @@ class UrlDownloaderTest {
         assertEquals(1, dir.list()!!.size)
     }
 
+    @Test
+    fun `vượt giới hạn dung lượng thì xoá file lâu không dùng nhất`() {
+        downloader = UrlDownloader(OkHttpClient(), dir, callbackExecutor = { it.run() }, maxCacheBytes = 10)
+        repeat(3) { server.enqueue(media("image/jpeg", ByteArray(4))) }
+        val now = System.currentTimeMillis()
+
+        val oldest = load(server.url("/a.jpg").toString()).file!!
+        oldest.setLastModified(now - 3_000)
+        val middle = load(server.url("/b.jpg").toString()).file!!
+        middle.setLastModified(now - 2_000)
+        val newest = load(server.url("/c.jpg").toString()).file!!
+
+        // 3 file × 4 byte = 12 > 10 → xoá file cũ nhất, còn 8 byte
+        assertEquals(false, oldest.exists())
+        assertTrue(middle.exists())
+        assertTrue(newest.exists())
+    }
+
+    @Test
+    fun `khởi tạo thì dọn file tmp sót lại từ lần chạy trước`() {
+        dir.mkdirs()
+        val staleTmp = File(dir, "abc.jpg.123.tmp").apply {
+            writeText("dở dang")
+            setLastModified(System.currentTimeMillis() - 60_000)
+        }
+
+        UrlDownloader(OkHttpClient(), dir, callbackExecutor = { it.run() })
+
+        val deadline = System.currentTimeMillis() + 2_000
+        while (staleTmp.exists() && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        assertEquals(false, staleTmp.exists())
+    }
+
     private fun media(contentType: String, bytes: ByteArray) =
         MockResponse.Builder()
             .setHeader("Content-Type", contentType)

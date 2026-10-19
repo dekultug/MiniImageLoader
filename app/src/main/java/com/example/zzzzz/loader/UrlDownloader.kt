@@ -60,6 +60,8 @@ fun interface Cancellable {
  *
  * Có sẵn file của URL trong [directory] thì trả luôn (GET), chưa có mới tải (DOWNLOAD).
  * File được ghi vào `.tmp` rồi rename → không bao giờ để lại file ảnh ghi dở.
+ * Tổng dung lượng thư mục giữ ≤ [maxCacheBytes]: vượt thì xoá file lâu không dùng nhất
+ * (lastModified cũ nhất — mỗi lần GET trúng đều cập nhật lastModified).
  * Mọi callback chạy trên [callbackExecutor] (mặc định main thread), kể cả lỗi validate,
  * để phía gọi luôn nhận callback trên cùng 1 thread. Sau khi [Cancellable.cancel] thì không
  * bắn callback nào nữa.
@@ -68,7 +70,21 @@ class UrlDownloader(
     private val client: OkHttpClient,
     private val directory: File,
     private val callbackExecutor: Executor = MainThreadExecutor,
+    private val maxCacheBytes: Long = Long.MAX_VALUE,
 ) {
+
+    private val trimLock = Any()
+
+    init {
+        // Dọn file .tmp sót lại khi app bị kill giữa lúc ghi. Chỉ xoá file cũ hơn lúc khởi tạo,
+        // không đụng vào file .tmp của lượt tải đang chạy.
+        val startedAt = System.currentTimeMillis()
+        client.dispatcher.executorService.execute {
+            directory.listFiles { file ->
+                file.name.endsWith(".tmp") && file.lastModified() < startedAt - STALE_TMP_AGE_MS
+            }?.forEach { it.delete() }
+        }
+    }
 
     /**
      * GET hoặc DOWNLOAD:
@@ -176,8 +192,28 @@ class UrlDownloader(
             return
         }
 
+        trimToSize(keep = target)
+
         if (call.isCanceled()) return
         callbackExecutor.execute { callback.onSuccess(url, target, kind) }
+    }
+
+    /** Xoá file có lastModified cũ nhất cho tới khi tổng dung lượng ≤ [maxCacheBytes]. */
+    private fun trimToSize(keep: File) {
+        if (maxCacheBytes == Long.MAX_VALUE) return
+        synchronized(trimLock) {
+            val files = directory.listFiles { file -> file.isFile && !file.name.endsWith(".tmp") } ?: return
+            var total = files.sumOf { it.length() }
+            if (total <= maxCacheBytes) return
+
+            val oldestFirst = files.map { it to it.lastModified() }.sortedBy { it.second }
+            for ((file, _) in oldestFirst) {
+                if (total <= maxCacheBytes) break
+                if (file == keep) continue
+                val size = file.length()
+                if (file.delete()) total -= size
+            }
+        }
     }
 
     private fun deliverError(callback: DownloadCallback, url: String, error: DownloadError) {
@@ -210,6 +246,7 @@ class UrlDownloader(
                 else -> if (contentType.subtype == "octet-stream") kindFromExtension else null
             }
 
+        private const val STALE_TMP_AGE_MS = 10_000L
         private const val FALLBACK_IMAGE_EXTENSION = "img"
         private const val FALLBACK_VIDEO_EXTENSION = "vid"
 
