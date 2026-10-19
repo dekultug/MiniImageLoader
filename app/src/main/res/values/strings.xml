@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">ZZZZZ</string>
+    <string name="feed_load_error">Không tải được feed: %1$s</string>
+    <string name="retry">Thử lại</string>
+</resources>
